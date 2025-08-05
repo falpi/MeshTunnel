@@ -27,3 +27,9 @@
 ```bash
 MeshTunnel myrules.mcrouter
 ```
+
+## 🙌 Credits
+
+- **Original Project**: [MeshCentral Router](https://github.com/Ylianst/MeshCentralRouter) by [Ylianst](https://github.com/Ylianst)
+
+*Not affiliated with the MeshCentral project.*
