@@ -21,11 +21,40 @@
 | .mcrouter support     | ✅                     | ✅                     |
 | Dependencies          | WinForms               | **Pure .NET 8**        |
 
+## ⚙️ Build
+There are already three different publish profiles for Windows, MacOS, and Linux for building the project. These can be invoked from the IDE or from the command line as follows:
+```bash
+dotnet publish -p:PublishProfile=publish-win-x64
+dotnet publish -p:PublishProfile=publish-osx-x64
+dotnet publish -p:PublishProfile=publish-linux-x64
+```
 
 ## 🛠️ Usage
 
 ```bash
 MeshTunnel myrules.mcrouter
+```
+
+## 📁 Mapping Rules File Format
+
+The `sample.mcrouter` file illustrates the minimum subset of attributes needed to configure one or more mapping rules, according to the format established by the original "MeshCentral Router" tool. You can build these files manually or create the rules using the MeshCentral Router GUI for Windows and then export them in JSON format.
+The following is an example of the configuration file.
+
+```json
+{
+  "hostname": "mesh.example.com/?key=optional_login_key",
+  "username": "admin",
+  "password": "manager",
+  "mappings": [{
+      "nodeName": "DBSERVER",
+      "name": "MySQL Rule",
+      "nodeId": "node//9876543210",
+      "protocol": 0,
+      "localPort": 3306,
+      "remotePort": 3306
+    }
+  ]
+}
 ```
 
 ## 🙌 Credits
