@@ -1,0 +1,21 @@
+{
+   "hostname": "<hostname>/?key=<optional-login-key>",
+   "username": "<username-or-token>",
+   "password": "<password-or-secret>",
+   "mappings": [{
+         "nodeName": "<node-name>",
+         "name": "<tcp-sample-rule>",
+         "nodeId": "<node-id>",
+         "protocol": 0,
+         "localPort": 12345,
+         "remotePort": 12345
+      },{
+         "nodeName": "<node-name>",
+         "name": "<udp-sample-rule>",
+         "nodeId": "<node-id>",
+         "protocol": 1,
+         "localPort": 12345,
+         "remotePort": 12345
+      }
+   ]
+}
