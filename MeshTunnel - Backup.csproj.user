@@ -1,9 +1,0 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-   <PropertyGroup>
-      <ItemGroup>
-         <RuntimeHostConfigurationOption Include="System.Globalization.Invariant" Value="true"/>
-         <RuntimeHostConfigurationOption Include="System.CompilerServices.RuntimeFeature.IsDynamicCodeSupported" Value="false"/>
-      </ItemGroup>
-   </PropertyGroup>
-</Project>
