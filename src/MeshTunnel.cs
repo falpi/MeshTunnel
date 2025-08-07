@@ -1,95 +1,143 @@
 ﻿
-using System.Text.Json;
+using static MeshTunnel.Utils;
 
 namespace MeshTunnel {
 
     static class MeshTunnel {
 
-        public static MeshServer? server;
-        public static List<MeshMapper>? mappers;
+        // Variabili di lavoro
+        public static bool mainThreadRunning = true;
+        public static readonly CancellationTokenSource cts = new();
 
-        static void Main(string[] args) {
+        private static MeshServer server = new MeshServer();
+        private static Dictionary<string, object> serverConfig = new Dictionary<string, object>();
 
-            // Prepara variabili di lavoro
-            Uri? serverurl = null;
-            string? hostname = null;
-            string? username = null;
-            string? password = null;
-            string? certhash = null;
-            Dictionary<string, object>? config;
-            List<Dictionary<string, object>>? mappings = null;
+        private static List<MeshMapper> mappers = new List<MeshMapper>();
+        private static List<Dictionary<string, object>> mappersConfig = new List<Dictionary<string, object>>();
+
+        static async Task Main(string[] args) {
+
+            // Cattura i segnali di interruzione
+            catchSignals();
+
+            // Legge configurazione tunnels
+            readConfig(args[0]);
+
+            // Genera logging
+            Console.WriteLine("Application starting...");
+
+            // Connette al relay server e crea i tunnel
+            connectServer();
+            createTunnels();
+
+            // Genera logging
+            Console.WriteLine("Application started");
+
+            try {
+                while ((server.connectionState == (int)WebSocketClient.ConnectionStates.Connected) &&
+                      mappers.All(mapper => mapper.state == 1)) {
+
+                    await Task.Delay(1000, cts.Token);
+                }
+            } catch (TaskCanceledException) {
+                Console.WriteLine("Application stopping...");
+            }
+
+            // Disconnette dal relay server
+            disconnectServer();
+
+            // Genera logging
+            Console.WriteLine("Application stopped");
+
+            // Conclude main thread
+            mainThreadRunning = false;
+        }
+
+        static void readConfig(string configPath) {
 
             // Estrazione dei parametri di configurazione
-            Console.WriteLine("Parse configuration...");
+            Console.WriteLine("Read configuration...");
 
             try {
                 // Leggi e deserializza il file di configurazione
-                config = JsonHelper.Deserialize(File.ReadAllText(args[0]));
+                serverConfig = JsonHelper.Deserialize(File.ReadAllText(configPath));
 
                 // Validazione della configurazione di base
-                if (config == null)
+                if (serverConfig == null)
                     throw new Exception("Invalid configuration file");
 
-                // Estrai e valida i parametri principali
-                hostname = GetConfigValue<string>(config, "hostname");
-                username = GetConfigValue<string>(config, "username");
-                password = GetConfigValue<string>(config, "password");
-                certhash = GetConfigValue<string>(config, "certhash", true);
-
                 // Estrai e valida i mappings
-                if (!config.TryGetValue("mappings", out var mappingsObj) ||
+                if (!serverConfig.TryGetValue("mappings", out var mappingsObj) ||
                     !(mappingsObj is IEnumerable<object> mappingsList)) {
                     throw new Exception("Invalid or missing mappings in configuration");
                 }
 
                 // Converti i mappings in un formato più gestibile
-                mappings = new List<Dictionary<string, object>>();
                 foreach (var mapping in mappingsList) {
                     if (mapping is Dictionary<string, object> mappingDict) {
                         ValidateMapping(mappingDict);
-                        mappings.Add(mappingDict);
+                        mappersConfig.Add(mappingDict);
                     }
-                }
-
-                // Gestisce l'eventuale presenza della login key
-                int keyIndex = hostname.IndexOf("?key=");
-                if (keyIndex < 0) {
-                    serverurl = new Uri("wss://" + hostname + "/control.ashx");
-                } else {
-                    serverurl = new Uri("wss://" + hostname.Substring(0, keyIndex) + "/control.ashx?key=" + hostname.Substring(keyIndex + 5));
                 }
 
             } catch (Exception ex) {
                 Console.WriteLine($"Configuration error: {ex.Message}");
                 Environment.Exit(1);
             }
+        }
+
+        static void connectServer() {
 
             // Gestisce la connessione al server
             Console.WriteLine("Server connecting...");
 
-            server = new MeshServer();
-            server.connect(serverurl, username, password, null, null);
+            // Estrai e valida i parametri di connessione
+            string? hostname = GetConfigValue<string>(serverConfig, "hostname");
+            string? username = GetConfigValue<string>(serverConfig, "username");
+            string? password = GetConfigValue<string>(serverConfig, "password");
 
-            while (server.connectionState == (int)WebSocketClient.ConnectionStates.Connecting) {
-                System.Threading.Thread.Sleep(100);
+            // Prepara la url del serve gestendo l'eventuale presenza della login key
+            Uri? serverurl = null;
+            int keyIndex = hostname.IndexOf("?key=");
+            if (keyIndex < 0) {
+                serverurl = new Uri("wss://" + hostname + "/control.ashx");
+            } else {
+                serverurl = new Uri("wss://" + hostname.Substring(0, keyIndex) + "/control.ashx?key=" + hostname.Substring(keyIndex + 5));
             }
 
+            // Inizia la connessione
+            server.connect(serverurl, username, password, null, null);
+
+            // Attende il completamento della connessione
+            while (server.connectionState == (int)WebSocketClient.ConnectionStates.Connecting) {
+                Thread.Sleep(100);
+            }
+
+            // Se si sono verificati errori esce
             if (server.connectionState != (int)WebSocketClient.ConnectionStates.Connected) {
                 Console.WriteLine("Server connection error: " + server.disconnectCause + "," + server.disconnectMsg);
                 Environment.Exit(1);
             }
 
             Console.WriteLine("Server connected");
+        }
+
+        static void disconnectServer() {
+            Console.WriteLine("Disconnecting from server...");
+            server.disconnect();
+        }
+
+        static void createTunnels() {
+
             Console.WriteLine("Starting tunnels...");
 
-            // Inizializza la lista dei mapper
-            mappers = new List<MeshMapper>();
+            // Estrai e valida i parametri di connessione
+            string? hostname = GetConfigValue<string>(serverConfig, "hostname");
 
             try {
 
                 // Avvia tutti i tunnel
-                foreach (var mapping in mappings!) {
-
+                foreach (var mapping in mappersConfig!) {
                     var name = (string)mapping["name"];
                     var nodeName = (string)mapping["nodeName"];
                     var nodeId = (string)mapping["nodeId"];
@@ -98,6 +146,7 @@ namespace MeshTunnel {
                     var remotePort = (int)GetLongValue(mapping["remotePort"]);
                     var remoteIP = mapping.TryGetValue("remoteIP", out var rip) ? (string)rip : null;
 
+                    // Prepara la url del mapper gestendo l'eventuale presenza della login key
                     string mapperurl;
                     int keyIndex = hostname.IndexOf("?key=");
                     if (keyIndex < 0) {
@@ -106,6 +155,7 @@ namespace MeshTunnel {
                         mapperurl = "wss://" + hostname.Substring(0, keyIndex) + "/meshrelay.ashx?nodeid=" + nodeId + "&key=" + hostname.Substring(keyIndex + 5);
                     }
 
+                    // Aggiusta la url del mapper in base al protocollo
                     if (protocol == 1) {
                         mapperurl += ("&tcpport=" + remotePort);
                         if (remoteIP != null) { mapperurl += "&tcpaddr=" + remoteIP; }
@@ -113,6 +163,8 @@ namespace MeshTunnel {
                         mapperurl += ("&udpport=" + remotePort);
                         if (remoteIP != null) { mapperurl += "&udpaddr=" + remoteIP; }
                     }
+
+                    if (remoteIP == null) remoteIP = "127.0.0.1";
 
                     Console.WriteLine($"Starting tunnel {name} for node {nodeName} (local:{localPort} -> remote:{remoteIP}:{remotePort})");
 
@@ -125,103 +177,9 @@ namespace MeshTunnel {
 
                     mappers.Add(mapper);
                 }
-
-                Console.WriteLine($"All {mappers.Count} tunnels activated successfully");
-
-                // Mantieni attiva la connessione finché il server è connesso o ci sono tunnel attivi
-                while (server.connectionState == (int)WebSocketClient.ConnectionStates.Connected &&
-                       mappers.Any(m => m.state == 1)) {
-                    System.Threading.Thread.Sleep(1000);
-                }
             } catch (Exception ex) {
                 Console.WriteLine($"Tunnel error: {ex.Message}");
-            } finally {
-                // Ferma tutti i tunnel
-                Console.WriteLine("Stopping all tunnels...");
-                if (mappers != null) {
-                    foreach (var mapper in mappers) {
-                        try {
-                            mapper.stop();
-                        } catch (Exception ex) {
-                            Console.WriteLine($"Error stopping tunnel: {ex.Message}");
-                        }
-                    }
-                }
-
-                // Disconnessione dal server
-                Console.WriteLine("Disconnecting from server...");
-                server?.disconnect();
             }
-        }
-
-        // Metodo helper per estrarre valori dalla configurazione con validazione
-        private static T? GetConfigValue<T>(Dictionary<string, object> config, string key, bool optional = false) {
-            if (!config.TryGetValue(key, out var value)) {
-                if (optional) return default;
-                throw new Exception($"Missing required configuration key: {key}");
-            }
-
-            if (value is T typedValue) {
-                return typedValue;
-            }
-
-            throw new Exception($"Invalid type for configuration key {key}. Expected {typeof(T).Name}, got {value.GetType().Name}");
-        }
-
-        // Metodo per validare un singolo mapping
-        private static void ValidateMapping(Dictionary<string, object> mapping) {
-            var requiredFields = new Dictionary<string, Type> {
-                { "nodeName", typeof(string) },
-                { "name", typeof(string) },
-                { "nodeId", typeof(string) },
-                { "protocol", typeof(long) },
-                { "localPort", typeof(long) },
-                { "remotePort", typeof(long) }
-            };
-
-            foreach (var field in requiredFields) {
-                if (!mapping.TryGetValue(field.Key, out var value)) {
-                    throw new Exception($"Missing required field in mapping: {field.Key}");
-                }
-
-                if (field.Value == typeof(long)) {
-                    if (value is not JsonElement jsonElement || !jsonElement.TryGetInt64(out _)) {
-                        if (value is not long) {
-                            throw new Exception($"Field '{field.Key}' must be a number");
-                        }
-                    }
-                } else if (value.GetType() != field.Value) {
-                    throw new Exception($"Field '{field.Key}' has wrong type. Expected {field.Value.Name}, got {value.GetType().Name}");
-                }
-            }
-
-            // Validazione porte
-            var localPort = GetLongValue(mapping["localPort"]);
-            if (localPort <= 0 || localPort > 65535)
-                throw new Exception($"Invalid localPort in mapping: {mapping["localPort"]}");
-
-            var remotePort = GetLongValue(mapping["remotePort"]);
-            if (remotePort <= 0 || remotePort > 65535)
-                throw new Exception($"Invalid remotePort in mapping: {mapping["remotePort"]}");
-
-            // Validazione remoteIP solo se presente
-            if (mapping.TryGetValue("remoteIP", out var remoteIpObj)) {
-                if (remoteIpObj is string remoteIp) {
-                    if (!System.Net.IPAddress.TryParse(remoteIp, out _))
-                        throw new Exception($"Invalid remoteIP format: {remoteIp}");
-                } else {
-                    throw new Exception("Field 'remoteIP' must be a string when present");
-                }
-            }
-        }
-
-        private static long GetLongValue(object value) {
-            return value switch {
-                long l => l,
-                int i => i,
-                JsonElement e when e.TryGetInt64(out var num) => num,
-                _ => throw new Exception($"Cannot convert value to long: {value}")
-            };
         }
     }
 }
