@@ -40,8 +40,8 @@ namespace MeshTunnel
         private MemoryStream? deflateMemory;
         private static byte[] inflateEnd = { 0x00, 0x00, 0xff, 0xff };
         private static byte[] inflateStart = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
-        public int pingTimeSeconds = 0;
-        public int pongTimeSeconds = 0;
+        public int pingTimeSeconds = 30;
+        public int pongTimeSeconds = 30;
         private System.Threading.Timer? pingTimer = null;
         private System.Threading.Timer? pongTimer = null;
         private System.Threading.Timer? connectTimer = null;
